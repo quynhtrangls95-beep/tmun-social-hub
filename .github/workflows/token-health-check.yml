@@ -1,0 +1,105 @@
+name: Token Health Check (canh bao Page Token sap het han)
+
+on:
+  schedule:
+    # 8h sang thu Hai VN = 1h UTC thu Hai
+    - cron: "0 1 * * 1"
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Check token health
+        id: check
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          PYTHONUNBUFFERED: "1"
+        run: |
+          set +e
+          python scripts/check_token.py
+          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          exit 0
+
+      - name: Tao GitHub Issue neu token sap het han
+        if: steps.check.outputs.exit_code == '1'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const today = new Date().toISOString().slice(0, 10);
+            const title = `FB Page Token sap het han - can refresh truoc ${today}`;
+
+            const existingIssues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'token-expiry',
+              state: 'open',
+            });
+
+            if (existingIssues.data.length > 0) {
+              console.log('Da co issue mo, khong tao moi');
+              return;
+            }
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: title,
+              labels: ['token-expiry', 'priority-high'],
+              body: [
+                '## Token FB sap het han',
+                '',
+                'Token Page Access Token cho Fanpage **Tra Thao Moc Uyen Nhien chinh hang** con duoi 14 ngay nua se het han.',
+                '',
+                '**Hanh dong can lam:**',
+                '1. Mo file `docs/HUONG-DAN-REFRESH-TOKEN.md` trong repo nay',
+                '2. Lam theo 5 buoc trong do (chi mat ~5 phut)',
+                '3. Sau khi update Secret xong, dong issue nay lai',
+                '',
+                '**Neu khong refresh:** Sau ngay het han, tat ca lich dang FB se fail, bao cao Insights cung dung. Khong co ban tin moi nao len Fanpage.',
+                '',
+                '**Chay tay workflow nay** sau khi update token de verify:',
+                `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/workflows/token-health-check.yml`,
+              ].join('\n'),
+            });
+
+      - name: Tao GitHub Issue neu token chet/sai
+        if: steps.check.outputs.exit_code == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: 'CRITICAL: FB Page Token da chet hoac sai',
+              labels: ['token-expiry', 'priority-critical'],
+              body: [
+                '## Token FB da chet',
+                '',
+                'Token Page hien tai khong con hop le. He thong dang dung KHONG dang duoc bai len FB.',
+                '',
+                '**Co the do:**',
+                '- Chi da doi mat khau Facebook',
+                '- Chi da revoke app TMUN Social Hub trong Facebook Settings',
+                '- Token het han som hon du kien',
+                '- FB detect bat thuong',
+                '',
+                '**Hanh dong:** Lam theo `docs/HUONG-DAN-REFRESH-TOKEN.md` ngay.',
+              ].join('\n'),
+            });
