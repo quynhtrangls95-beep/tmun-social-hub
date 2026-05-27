@@ -36,6 +36,8 @@ def fetch_post_full(token: str, post_id: str) -> dict:
         "privacy",
         "status_type",
         "promotion_status",
+        "feed_targeting",
+        "targeting",
         "from",
         "attachments{type,media_type,url}",
     ]
@@ -57,6 +59,13 @@ def fetch_page_full(token: str, page_id: str) -> dict:
         "is_published",
         "is_verified",
         "verification_status",
+        "country_page_likes",
+        "country_restricted",
+        "age_restricted",
+        "global_brand_page_name",
+        "global_brand_root_id",
+        "is_owned",
+        "restricted_country_codes",
         "link",
         "about",
         "founded",
@@ -109,6 +118,11 @@ def emit_summary(post: dict, page: dict, recent: dict) -> None:
         lines.append(f"| about | {(page.get('about') or '')[:100]} |")
         tasks = page.get("tasks", [])
         lines.append(f"| tasks | {', '.join(tasks) if tasks else 'N/A'} |")
+        lines.append(f"| **country_restricted** | **{page.get('country_restricted', 'N/A')}** |")
+        lines.append(f"| **age_restricted** | **{page.get('age_restricted', 'N/A')}** |")
+        lines.append(f"| **restricted_country_codes** | **{page.get('restricted_country_codes', 'N/A')}** |")
+        lines.append(f"| is_owned | {page.get('is_owned', 'N/A')} |")
+        lines.append(f"| global_brand_page_name | {page.get('global_brand_page_name', 'N/A')} |")
 
     # ====== POST INFO ======
     lines.append("\n# Post Status\n")
@@ -136,6 +150,14 @@ def emit_summary(post: dict, page: dict, recent: dict) -> None:
         for i, att in enumerate(attachments):
             lines.append(f"| attachment[{i}].type | {att.get('type', 'N/A')} |")
             lines.append(f"| attachment[{i}].media_type | {att.get('media_type', 'N/A')} |")
+        feed_targeting = post.get("feed_targeting")
+        targeting = post.get("targeting")
+        if feed_targeting:
+            lines.append(f"| **feed_targeting** | **`{json.dumps(feed_targeting, ensure_ascii=False)}`** |")
+        if targeting:
+            lines.append(f"| **targeting** | **`{json.dumps(targeting, ensure_ascii=False)}`** |")
+        if not feed_targeting and not targeting:
+            lines.append(f"| feed_targeting / targeting | (khong co - bai khong bi target restrict) |")
 
     # ====== RECENT POSTS ======
     lines.append("\n# 5 bai gan nhat tren Page\n")
