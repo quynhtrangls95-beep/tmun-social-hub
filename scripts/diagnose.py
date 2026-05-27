@@ -55,13 +55,11 @@ def fetch_page_full(token: str, page_id: str) -> dict:
         "fan_count",
         "followers_count",
         "is_published",
-        "is_unpublished",
         "is_verified",
         "verification_status",
         "link",
         "about",
         "founded",
-        "page_token",
         "tasks",
     ]
     url = f"{GRAPH_API_BASE}/{page_id}"

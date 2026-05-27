@@ -16,6 +16,7 @@ Graph API version: v21.0 (stable 2025-2026)
 """
 
 import os
+import json
 import time
 import logging
 import requests
@@ -89,15 +90,38 @@ class FacebookPage:
         return body["id"]
 
     def post_single_photo(self, image_url: str, caption: str, published: bool = True) -> str:
-        """Dang 1 anh tu URL kem caption. Tra ve post_id (page_post_id)."""
-        data = {
+        """
+        Dang 1 anh kem caption — dung pattern UPLOAD-THEN-ATTACH de bai hien trong
+        FEED CHINH cua Page (status_type='added_photos' qua /photos endpoint chi
+        vao Photos album, KHONG hien voi nguoi ngoai, vi du da gap trong test
+        2026-05-27).
+
+        Pattern chuan:
+          1. POST /{page_id}/photos voi published=false  -> lay media_fbid
+          2. POST /{page_id}/feed voi attached_media[0] -> tao feed post
+
+        Tra ve post_id cua feed post (page_post_id).
+        """
+        # Step 1: Upload photo unpublished, chi de lay media_fbid
+        photo_data = {
             "url": image_url,
-            "caption": caption,
+            "published": "false",
+            "access_token": self.access_token,
+        }
+        photo_body = _request("POST", self._url(f"{self.page_id}/photos"), data=photo_data)
+        media_fbid = photo_body.get("id")
+        if not media_fbid:
+            raise FacebookAPIError(f"Khong lay duoc media_fbid sau khi upload anh: {photo_body}")
+
+        # Step 2: Tao feed post attach anh do
+        feed_data = {
+            "message": caption,
+            "attached_media[0]": json.dumps({"media_fbid": str(media_fbid)}),
             "published": "true" if published else "false",
             "access_token": self.access_token,
         }
-        body = _request("POST", self._url(f"{self.page_id}/photos"), data=data)
-        return body.get("post_id") or body.get("id")
+        feed_body = _request("POST", self._url(f"{self.page_id}/feed"), data=feed_data)
+        return feed_body["id"]
 
     def post_multi_photo(self, image_urls: list[str], caption: str) -> str:
         """Dang nhieu anh (carousel) trong 1 post. Tra ve post_id."""
