@@ -188,6 +188,8 @@ function doPost(e) {
     if (action === "mark_failed") return jsonResponse_(markFailed_(payload));
     if (action === "save_insights") return jsonResponse_(saveInsights_(payload));
     if (action === "log") return jsonResponse_(logRow_(payload));
+    if (action === "add_row") return jsonResponse_(addRow_(payload));
+    if (action === "bulk_add") return jsonResponse_(bulkAdd_(payload));
     return jsonResponse_({ ok: false, error: "Unknown action: " + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -335,6 +337,68 @@ function lookupScheduleByPostId_(postId) {
     }
   }
   return { caption: "", form: "", topic: "", posted_at: "" };
+}
+
+function addRow_(p) {
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_SCHEDULE);
+  const lastRow = sh.getLastRow();
+  const newRowNum = lastRow + 1;
+  const stt = lastRow;  // header chiem row 1, neu lastRow=1 thi stt=1
+
+  const ngayValue = parseInputDate_(p.ngay);
+  const row = [
+    stt,
+    ngayValue || p.ngay || "",
+    p.gio || "",
+    p.caption || "",
+    p.images || p.anh || "",
+    p.link || "",
+    (p.channel || "FB").toUpperCase(),
+    p.post_type || "photo",
+    p.dang_bai || p.form || "anh-don",
+    p.chu_de || p.topic || "san-pham",
+    p.status || "Pending",
+    "",  // Post ID - he thong tu fill
+    "",  // Posted At
+    "",  // Error
+  ];
+  sh.getRange(newRowNum, 1, 1, row.length).setValues([row]);
+  return { ok: true, row: newRowNum, stt: stt };
+}
+
+function bulkAdd_(p) {
+  if (!Array.isArray(p.items)) {
+    return { ok: false, error: "Field 'items' phai la array" };
+  }
+  const results = [];
+  for (const item of p.items) {
+    try {
+      results.push(addRow_(item));
+    } catch (e) {
+      results.push({ ok: false, error: String(e) });
+    }
+  }
+  return { ok: true, count: results.length, results: results };
+}
+
+function parseInputDate_(s) {
+  if (!s) return null;
+  if (Object.prototype.toString.call(s) === "[object Date]") return s;
+  s = String(s).trim();
+
+  // Try ISO format YYYY-MM-DD
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+  if (m) return new Date(parseInt(m[1]), parseInt(m[2]) - 1, parseInt(m[3]));
+
+  // Try VN format dd/MM/yyyy
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+
+  // Try VN short dd-MM-yyyy
+  m = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})/);
+  if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
+
+  return null;
 }
 
 function logRow_(p) {
