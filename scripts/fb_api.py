@@ -91,18 +91,37 @@ class FacebookPage:
 
     def post_single_photo(self, image_url: str, caption: str, published: bool = True) -> str:
         """
-        Dang 1 anh kem caption — dung pattern UPLOAD-THEN-ATTACH de bai hien trong
-        FEED CHINH cua Page (status_type='added_photos' qua /photos endpoint chi
-        vao Photos album, KHONG hien voi nguoi ngoai, vi du da gap trong test
-        2026-05-27).
+        Dang 1 anh kem caption — DUAL-PATTERN voi auto-fallback.
 
-        Pattern chuan:
+        Pattern A (preferred, app Live + Advanced Access):
           1. POST /{page_id}/photos voi published=false  -> lay media_fbid
           2. POST /{page_id}/feed voi attached_media[0] -> tao feed post
+          -> Bai len feed chinh, public voi nguoi ngoai
 
-        Tra ve post_id cua feed post (page_post_id).
+        Pattern B (fallback, app Live + Standard Access):
+          POST /{page_id}/photos voi published=true va caption truc tiep
+          -> status_type='added_photos' nhung VAN public neu app Live Mode
+
+        Auto-fallback: neu Pattern A fail voi error #200 (permission/unpublished),
+        thu Pattern B ngay.
+
+        Tra ve post_id cua post da tao.
         """
-        # Step 1: Upload photo unpublished, chi de lay media_fbid
+        # Try Pattern A first
+        try:
+            return self._post_photo_pattern_a(image_url, caption, published)
+        except FacebookAPIError as e:
+            err_code = e.response.get("error", {}).get("code") if e.response else None
+            err_msg = str(e).lower()
+            log.warning("Pattern A (upload-attach) fail [code=%s]: %s. Thu Pattern B...", err_code, e)
+
+            # Only fallback if error is permission/unpublished related (code 200, 100, etc.)
+            if err_code in (100, 200) or "unpublished" in err_msg or "must be posted" in err_msg:
+                return self._post_photo_pattern_b(image_url, caption, published)
+            raise  # Other errors: re-raise
+
+    def _post_photo_pattern_a(self, image_url: str, caption: str, published: bool) -> str:
+        """Pattern A: upload unpublished -> attach to feed. Cần Advanced Access."""
         photo_data = {
             "url": image_url,
             "published": "false",
@@ -111,9 +130,8 @@ class FacebookPage:
         photo_body = _request("POST", self._url(f"{self.page_id}/photos"), data=photo_data)
         media_fbid = photo_body.get("id")
         if not media_fbid:
-            raise FacebookAPIError(f"Khong lay duoc media_fbid sau khi upload anh: {photo_body}")
+            raise FacebookAPIError(f"Khong lay duoc media_fbid: {photo_body}", photo_body)
 
-        # Step 2: Tao feed post attach anh do
         feed_data = {
             "message": caption,
             "attached_media[0]": json.dumps({"media_fbid": str(media_fbid)}),
@@ -123,25 +141,63 @@ class FacebookPage:
         feed_body = _request("POST", self._url(f"{self.page_id}/feed"), data=feed_data)
         return feed_body["id"]
 
+    def _post_photo_pattern_b(self, image_url: str, caption: str, published: bool) -> str:
+        """Pattern B fallback: direct /photos with caption. Standard Access OK."""
+        data = {
+            "url": image_url,
+            "caption": caption,
+            "published": "true" if published else "false",
+            "access_token": self.access_token,
+        }
+        body = _request("POST", self._url(f"{self.page_id}/photos"), data=data)
+        # /photos trả về {id, post_id}, prefer post_id (= page_post_id format)
+        return body.get("post_id") or body.get("id")
+
     def post_multi_photo(self, image_urls: list[str], caption: str) -> str:
-        """Dang nhieu anh (carousel) trong 1 post. Tra ve post_id."""
+        """
+        Dang nhieu anh (carousel) trong 1 post.
+
+        REQUIRES Advanced Access cho pages_manage_posts (vi step upload unpublished).
+        Neu app chi Standard Access, carousel KHONG work. Fallback: dang anh dau tien
+        nhu single photo (Pattern B) va add note caption co N anh khac.
+        """
         if not image_urls:
             raise FacebookAPIError("image_urls rong")
         if len(image_urls) > 10:
             raise FacebookAPIError("Toi da 10 anh / post")
 
+        try:
+            return self._post_carousel_pattern_a(image_urls, caption)
+        except FacebookAPIError as e:
+            err_code = e.response.get("error", {}).get("code") if e.response else None
+            err_msg = str(e).lower()
+            log.warning("Carousel Pattern A fail [code=%s]: %s. Fallback single photo...", err_code, e)
+
+            if err_code in (100, 200) or "unpublished" in err_msg or "must be posted" in err_msg:
+                # Fallback: post anh dau tien lam single, them note vao caption
+                fallback_caption = caption
+                if len(image_urls) > 1:
+                    fallback_caption += f"\n\n📷 (+{len(image_urls) - 1} ảnh khác — em sẽ đăng trong bài tiếp)"
+                return self._post_photo_pattern_b(image_urls[0], fallback_caption, True)
+            raise
+
+    def _post_carousel_pattern_a(self, image_urls: list[str], caption: str) -> str:
+        """Carousel pattern: upload unpublished -> attach all to feed."""
         media_ids = []
         for url in image_urls:
             data = {"url": url, "published": "false", "access_token": self.access_token}
             body = _request("POST", self._url(f"{self.page_id}/photos"), data=data)
-            media_ids.append(body["id"])
+            mid = body.get("id")
+            if not mid:
+                raise FacebookAPIError(f"Khong lay duoc media_fbid cho {url}: {body}", body)
+            media_ids.append(mid)
 
         feed_data = {
             "message": caption,
             "access_token": self.access_token,
         }
         for idx, mid in enumerate(media_ids):
-            feed_data[f"attached_media[{idx}]"] = f'{{"media_fbid":"{mid}"}}'
+            feed_data[f"attached_media[{idx}]"] = json.dumps({"media_fbid": str(mid)})
 
         feed_body = _request("POST", self._url(f"{self.page_id}/feed"), data=feed_data)
         return feed_body["id"]
@@ -220,6 +276,44 @@ class FacebookPage:
     # -----------------------------------------------------------------
 
     def verify_token(self) -> dict:
-        """Goi /me de check token con song khong. Tra ve {id, name, category}."""
+        """
+        Verify token: phai la Page Token, khong phai User Token.
+        Goi /debug_token de check type, sau do GET page info.
+        Raise FacebookAPIError voi message ro neu sai loai.
+        """
+        # Step 1: debug token to check type
+        debug_url = f"{GRAPH_API_BASE}/debug_token"
+        debug_params = {"input_token": self.access_token, "access_token": self.access_token}
+        debug_body = _request("GET", debug_url, params=debug_params)
+        debug_data = debug_body.get("data", {})
+        token_type = debug_data.get("type", "UNKNOWN")
+        is_valid = debug_data.get("is_valid", False)
+
+        if not is_valid:
+            raise FacebookAPIError(
+                "Token KHONG hop le (da chet hoac sai). Lay lai Page Access Token tu "
+                "Graph API Explorer va update GitHub Secret FB_PAGE_ACCESS_TOKEN."
+            )
+
+        if token_type != "PAGE":
+            raise FacebookAPIError(
+                f"Token la loai '{token_type}' nhung CAN la 'PAGE'. "
+                "Vao Graph API Explorer -> User or Page dropdown -> chon 'Page Access Token' "
+                "(KHONG phai User Token) -> chon Page Tra Thao Moc Uyen Nhien chinh hang -> "
+                "Generate. Sau do update GitHub Secret FB_PAGE_ACCESS_TOKEN."
+            )
+
+        token_page_id = debug_data.get("profile_id")
+        if token_page_id and self.page_id and token_page_id != self.page_id:
+            raise FacebookAPIError(
+                f"Token Page ID '{token_page_id}' KHAC voi expected '{self.page_id}'. "
+                "Co the token thuoc Page khac. Check lai Graph API Explorer chon dung Page."
+            )
+
+        # Step 2: get page info để return name + log
         params = {"fields": "id,name,category,fan_count", "access_token": self.access_token}
-        return _request("GET", self._url(self.page_id), params=params)
+        page_body = _request("GET", self._url(self.page_id), params=params)
+        page_body["_token_type"] = token_type
+        page_body["_token_expires_at"] = debug_data.get("expires_at", 0)
+        page_body["_token_scopes"] = debug_data.get("scopes", [])
+        return page_body

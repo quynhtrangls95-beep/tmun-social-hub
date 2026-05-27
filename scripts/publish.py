@@ -24,6 +24,18 @@ from zoneinfo import ZoneInfo
 from fb_api import FacebookPage, FacebookAPIError
 from sheets import SocialSheet, SheetError
 
+
+def _emit_summary_line(line: str) -> None:
+    """Ghi 1 dong vao GitHub Step Summary de hien trong tab Actions."""
+    f = os.getenv("GITHUB_STEP_SUMMARY")
+    if not f:
+        return
+    try:
+        with open(f, "a", encoding="utf-8") as fp:
+            fp.write(line + "\n")
+    except Exception:
+        pass
+
 TZ = ZoneInfo("Asia/Ho_Chi_Minh")
 
 logging.basicConfig(
@@ -108,10 +120,18 @@ def main() -> int:
 
     try:
         page_info = fb.verify_token()
-        log.info("Page OK: %s (%s)", page_info.get("name"), page_info.get("id"))
+        token_type = page_info.get("_token_type", "UNKNOWN")
+        expires_at = page_info.get("_token_expires_at", 0)
+        scopes = page_info.get("_token_scopes", [])
+        log.info(
+            "Page OK: %s (id=%s, token_type=%s, expires_at=%s, scopes=%s)",
+            page_info.get("name"), page_info.get("id"), token_type, expires_at, ",".join(scopes),
+        )
+        _emit_summary_line(f"✅ Token OK — type={token_type}, scopes={','.join(scopes)}")
     except FacebookAPIError as e:
-        log.error("Token khong hop le: %s", e)
-        sheet.log("ERROR", f"Token FB khong hop le: {e}")
+        log.error("Token KHONG hop le: %s", e)
+        sheet.log("ERROR", f"Token FB sai: {e}")
+        _emit_summary_line(f"❌ Token FAIL — {e}")
         return 1
 
     try:
@@ -128,6 +148,8 @@ def main() -> int:
     success_count = 0
     fail_count = 0
 
+    _emit_summary_line(f"\n📋 Co **{len(pending)} bai** can dang.\n")
+
     for item in pending:
         row = item.get("row")
         ok, post_id, err = publish_one(fb, item)
@@ -136,12 +158,15 @@ def main() -> int:
             try:
                 sheet.mark_posted(row, post_id, posted_at)
                 log.info("Row %s: OK post_id=%s", row, post_id)
+                _emit_summary_line(f"- ✅ Row {row}: posted, post_id=`{post_id}`")
                 success_count += 1
             except SheetError as e:
                 log.error("Da dang FB nhung khong cap nhat Sheet duoc: %s", e)
+                _emit_summary_line(f"- ⚠️ Row {row}: posted_id={post_id} NHUNG khong update Sheet: {e}")
                 fail_count += 1
         else:
             log.error("Row %s: FAIL - %s", row, err)
+            _emit_summary_line(f"- ❌ Row {row}: FAIL — {err}")
             try:
                 sheet.mark_failed(row, err)
             except SheetError as se:

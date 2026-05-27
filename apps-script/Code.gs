@@ -190,6 +190,8 @@ function doPost(e) {
     if (action === "log") return jsonResponse_(logRow_(payload));
     if (action === "add_row") return jsonResponse_(addRow_(payload));
     if (action === "bulk_add") return jsonResponse_(bulkAdd_(payload));
+    if (action === "reset_pending") return jsonResponse_(resetPending_(payload));
+    if (action === "delete_row") return jsonResponse_(deleteRow_(payload));
     return jsonResponse_({ ok: false, error: "Unknown action: " + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -399,6 +401,34 @@ function parseInputDate_(s) {
   if (m) return new Date(parseInt(m[3]), parseInt(m[2]) - 1, parseInt(m[1]));
 
   return null;
+}
+
+function resetPending_(p) {
+  /**
+   * Mark row Failed/Skip back to Pending de retry.
+   * Payload: { row: N } HOAC { rows: [N1, N2, ...] }
+   * Cung clear cot Error de log sach.
+   */
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_SCHEDULE);
+  const rows = p.rows || (p.row ? [p.row] : []);
+  if (rows.length === 0) return { ok: false, error: "Thieu field 'row' hoac 'rows'" };
+
+  for (const r of rows) {
+    sh.getRange(r, 11).setValue("Pending");  // K = Status
+    sh.getRange(r, 14).setValue("");          // N = Error - clear
+  }
+  return { ok: true, reset_count: rows.length };
+}
+
+function deleteRow_(p) {
+  /**
+   * Xoa han 1 row trong Lich dang (vd duplicate, hoac bai bo).
+   * Payload: { row: N }
+   */
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_SCHEDULE);
+  if (!p.row) return { ok: false, error: "Thieu field 'row'" };
+  sh.deleteRow(p.row);
+  return { ok: true };
 }
 
 function logRow_(p) {

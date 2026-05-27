@@ -2,9 +2,11 @@ name: Dang bai Facebook tu dong
 
 on:
   schedule:
-    # Chay moi 15 phut TRONG GIO HOAT DONG: 7h-23h VN = 0h-16h UTC
-    # Cron UTC: phut 0/15/30/45 cua moi gio tu 0-16
-    - cron: "*/15 0-16 * * *"
+    # Chay moi 5 phut TRONG GIO HOAT DONG: 7h-23h VN = 0h-16h UTC
+    # Giam tu */15 xuong */5 de tang reliability (GitHub cron co the skip 1-2 lan)
+    - cron: "*/5 0-16 * * *"
+    # Backup hourly de catch bai missed (vd Pending qua nhieu lan cron skip)
+    - cron: "0 17,18,19,20,21,22,23 * * *"  # them gio 0-6 UTC neu can ngoai gio chinh
   workflow_dispatch:  # cho phep chay tay tu GitHub UI
 
 concurrency:
