@@ -20,9 +20,11 @@ Mở: **https://developers.facebook.com/tools/explorer/**
 
 | Field | Giá trị |
 |---|---|
-| Meta App | `ClaudeTrang` |
+| Meta App | **`TMUN Auto Post`** ⚠️ (KHÔNG phải ClaudeTrang) — đây là App Live đang dùng cho production |
 | User or Page | **Page Access Token** → chọn **Trà Thảo Mộc Uyên Nhiên chính hãng** |
 | Permissions | Đảm bảo có đủ 7 scope: `read_insights`, `pages_show_list`, `business_management`, `pages_read_engagement`, `pages_read_user_content`, `pages_manage_posts`, `pages_manage_engagement` |
+
+> ⚠️ **QUAN TRỌNG**: PHẢI chọn app `TMUN Auto Post` (ID 2079680712645253, đã Live Mode). Nếu chọn nhầm `ClaudeTrang` (App ID 953696197460822, ở Development Mode), token mới sẽ KHÔNG cho bài public với người ngoài. Em đã verify điểm này 2026-05-27.
 
 → Bấm **Generate Access Token** màu xanh.
 
