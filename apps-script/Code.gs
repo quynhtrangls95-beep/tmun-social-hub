@@ -76,39 +76,41 @@ function setupAnalysisSheet_(ss) {
   sh.getRange("A1").setValue("PHAN TICH HIEU QUA CONTENT")
     .setFontSize(16).setFontWeight("bold").setFontColor("#1f4e3d");
 
+  const PLACEHOLDER = '"Chua co du lieu — pivot se hien sau khi co bai dang dau tien va co insights"';
+
   // 1. Hieu qua theo dang bai
   sh.getRange("A3").setValue("1. Engagement Rate trung binh theo Dang bai")
     .setFontWeight("bold").setBackground("#d9b471");
   sh.getRange("A4").setFormula(
-    `=QUERY('${SHEET_REPORT}'!A:N, "SELECT D, AVG(L), AVG(M), COUNT(A) WHERE D IS NOT NULL GROUP BY D LABEL D 'Dang bai', AVG(L) 'ER TB (%)', AVG(M) 'CR TB (%)', COUNT(A) 'So bai'", 1)`
+    `=IFERROR(QUERY('${SHEET_REPORT}'!A:N, "SELECT D, AVG(L), AVG(M), COUNT(A) WHERE D IS NOT NULL GROUP BY D LABEL D 'Dang bai', AVG(L) 'ER TB (%)', AVG(M) 'CR TB (%)', COUNT(A) 'So bai'", 1), ${PLACEHOLDER})`
   );
 
   // 2. Hieu qua theo chu de
   sh.getRange("F3").setValue("2. Engagement Rate trung binh theo Chu de")
     .setFontWeight("bold").setBackground("#d9b471");
   sh.getRange("F4").setFormula(
-    `=QUERY('${SHEET_REPORT}'!A:N, "SELECT E, AVG(L), AVG(M), COUNT(A) WHERE E IS NOT NULL GROUP BY E LABEL E 'Chu de', AVG(L) 'ER TB (%)', AVG(M) 'CR TB (%)', COUNT(A) 'So bai'", 1)`
+    `=IFERROR(QUERY('${SHEET_REPORT}'!A:N, "SELECT E, AVG(L), AVG(M), COUNT(A) WHERE E IS NOT NULL GROUP BY E LABEL E 'Chu de', AVG(L) 'ER TB (%)', AVG(M) 'CR TB (%)', COUNT(A) 'So bai'", 1), ${PLACEHOLDER})`
   );
 
   // 3. Top 10 bai engagement cao nhat
   sh.getRange("A12").setValue("3. TOP 10 bai Engagement Rate cao nhat (30 ngay)")
     .setFontWeight("bold").setBackground("#d9b471");
   sh.getRange("A13").setFormula(
-    `=QUERY('${SHEET_REPORT}'!A:N, "SELECT B, C, D, E, F, L ORDER BY L DESC LIMIT 10 LABEL B 'Posted', C 'Caption', D 'Dang', E 'Chu de', F 'Reach', L 'ER (%)'", 1)`
+    `=IFERROR(QUERY('${SHEET_REPORT}'!A:N, "SELECT B, C, D, E, F, L ORDER BY L DESC LIMIT 10 LABEL B 'Posted', C 'Caption', D 'Dang', E 'Chu de', F 'Reach', L 'ER (%)'", 1), ${PLACEHOLDER})`
   );
 
   // 4. Top 10 bai ra click nhieu nhat
   sh.getRange("A26").setValue("4. TOP 10 bai ra Click nhieu nhat (kha nang ra don)")
     .setFontWeight("bold").setBackground("#d9b471");
   sh.getRange("A27").setFormula(
-    `=QUERY('${SHEET_REPORT}'!A:N, "SELECT B, C, D, E, K, M ORDER BY K DESC LIMIT 10 LABEL B 'Posted', C 'Caption', D 'Dang', E 'Chu de', K 'Clicks', M 'CR (%)'", 1)`
+    `=IFERROR(QUERY('${SHEET_REPORT}'!A:N, "SELECT B, C, D, E, K, M ORDER BY K DESC LIMIT 10 LABEL B 'Posted', C 'Caption', D 'Dang', E 'Chu de', K 'Clicks', M 'CR (%)'", 1), ${PLACEHOLDER})`
   );
 
   // 5. Hieu qua theo gio dang
   sh.getRange("A40").setValue("5. Engagement Rate trung binh theo Gio dang")
     .setFontWeight("bold").setBackground("#d9b471");
   sh.getRange("A41").setFormula(
-    `=QUERY('${SHEET_REPORT}'!A:N, "SELECT HOUR(B), AVG(L), COUNT(A) WHERE B IS NOT NULL GROUP BY HOUR(B) ORDER BY HOUR(B) LABEL HOUR(B) 'Gio', AVG(L) 'ER TB (%)', COUNT(A) 'So bai'", 1)`
+    `=IFERROR(QUERY('${SHEET_REPORT}'!A:N, "SELECT HOUR(B), AVG(L), COUNT(A) WHERE B IS NOT NULL GROUP BY HOUR(B) ORDER BY HOUR(B) LABEL HOUR(B) 'Gio', AVG(L) 'ER TB (%)', COUNT(A) 'So bai'", 1), ${PLACEHOLDER})`
   );
 
   sh.setFrozenRows(2);
