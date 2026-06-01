@@ -1,0 +1,29 @@
+name: Admin - Xoa post FB (ad-hoc)
+
+on:
+  workflow_dispatch:
+    inputs:
+      post_id:
+        description: "Post ID day du, format {page_id}_{post_id}, vd 1063264180209204_122106271035302926"
+        required: true
+        type: string
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Run admin_delete_post.py
+        env:
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          POST_ID: ${{ inputs.post_id }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/admin_delete_post.py
