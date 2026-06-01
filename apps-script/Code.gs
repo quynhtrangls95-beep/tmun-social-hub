@@ -636,3 +636,22 @@ function parseTimestamp_(v) {
 function nowString_() {
   return Utilities.formatDate(new Date(), TZ, "yyyy-MM-dd HH:mm:ss");
 }
+
+// =====================================================================
+// SETUP DRIVE PERMISSIONS - chay 1 lan tu menu "Chay" cua Apps Script editor
+// (function khong co _ suffix nen hien trong dropdown)
+// Apps Script se popup Review permissions -> click Allow de cap quyen Drive.
+// Sau khi cap quyen, endpoint get_image va list_images se hoat dong.
+// =====================================================================
+function setupDrivePermissions() {
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const name = folder.getName();
+  let fileCount = 0;
+  const files = folder.getFiles();
+  while (files.hasNext()) {
+    files.next();
+    fileCount++;
+  }
+  Logger.log("OK! Folder '" + name + "' co " + fileCount + " file.");
+  return { folder: name, file_count: fileCount };
+}
