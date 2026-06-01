@@ -17,9 +17,12 @@ from __future__ import annotations
 
 import os
 import sys
+import base64
 import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
+
+import requests
 
 from fb_api import FacebookPage, FacebookAPIError
 from sheets import SocialSheet, SheetError
@@ -45,56 +48,121 @@ logging.basicConfig(
 log = logging.getLogger("publish")
 
 
-def parse_image_urls(raw: str) -> list[str]:
-    """Cot 'Anh' co the la 1 URL hoac nhieu URL phan tach bang | hoac newline."""
+def parse_image_refs(raw: str) -> list[dict]:
+    """
+    Cot 'Anh' co the chua:
+      - URL public (vd https://thaomocuyennhien.com/banner.jpg)
+      - Ten file trong folder Drive TMUN-Anh-FB (vd matngu_01.jpg)
+      - Hon hop ca 2, phan tach bang `|` hoac newline.
+
+    Tra ve list of {"type": "url"|"file", "value": str}.
+    """
     if not raw:
         return []
-    parts: list[str] = []
+    refs: list[dict] = []
     for chunk in raw.replace("\n", "|").split("|"):
         s = chunk.strip()
-        if s.startswith("http"):
-            parts.append(s)
-    return parts
+        if not s:
+            continue
+        if s.lower().startswith(("http://", "https://")):
+            refs.append({"type": "url", "value": s})
+        else:
+            refs.append({"type": "file", "value": s})
+    return refs
 
 
-def publish_one(fb: FacebookPage, item: dict) -> tuple[bool, str, str]:
+def parse_image_urls(raw: str) -> list[str]:
+    """Backward-compat: chi tra URL (bo file refs)."""
+    return [r["value"] for r in parse_image_refs(raw) if r["type"] == "url"]
+
+
+def resolve_image_binary(ref: dict, sheet: SocialSheet) -> tuple[bytes, str]:
+    """
+    Convert image ref -> (bytes, filename). Dung cho binary upload.
+    URL -> fetch GET. File -> goi Apps Script get_image -> decode base64.
+    Raise on failure.
+    """
+    if ref["type"] == "url":
+        url = ref["value"]
+        try:
+            resp = requests.get(url, timeout=30)
+            resp.raise_for_status()
+        except requests.RequestException as e:
+            raise FacebookAPIError(f"Khong fetch duoc URL {url}: {e}") from e
+        filename = url.rsplit("/", 1)[-1].split("?", 1)[0] or "image.jpg"
+        return resp.content, filename
+    else:
+        name = ref["value"]
+        try:
+            img = sheet.get_image(name)
+        except SheetError as e:
+            raise FacebookAPIError(f"Khong lay duoc anh '{name}' tu Drive: {e}") from e
+        if not img.get("base64"):
+            raise FacebookAPIError(f"Apps Script tra ve khong co base64 cho '{name}'")
+        try:
+            data = base64.b64decode(img["base64"])
+        except Exception as e:
+            raise FacebookAPIError(f"Decode base64 fail cho '{name}': {e}") from e
+        return data, img.get("name") or name
+
+
+def publish_one(fb: FacebookPage, sheet: SocialSheet, item: dict) -> tuple[bool, str, str]:
     """
     Dang 1 bai. Tra ve (success, post_id, error_msg).
 
     item co cac field tu Sheet:
       row       - so dong trong Sheet
       caption   - noi dung bai dang
-      images    - 1 hoac nhieu URL anh (cach nhau bang |)
+      images    - URL public, ten file Drive, hoac mix (phan tach `|`)
       link      - link gan vao bai (vd: link dat hang)
       channel   - 'FB' (phase 1 chi co FB)
       post_type - 'text' | 'photo' | 'carousel' | 'link'
+
+    Logic anh:
+      - Tat ca URL -> URL flow (giu logic cu, nhanh hon)
+      - Co bat ky tham chieu file -> binary flow (fetch URL + Drive thanh bytes)
     """
     caption = (item.get("caption") or "").strip()
-    images = parse_image_urls(item.get("images") or "")
+    refs = parse_image_refs(item.get("images") or "")
     link = (item.get("link") or "").strip() or None
     post_type = (item.get("post_type") or "").strip().lower()
 
+    has_file_ref = any(r["type"] == "file" for r in refs)
+    n_images = len(refs)
+
     if not post_type:
-        if len(images) >= 2:
+        if n_images >= 2:
             post_type = "carousel"
-        elif len(images) == 1:
+        elif n_images == 1:
             post_type = "photo"
         elif link:
             post_type = "link"
         else:
             post_type = "text"
 
-    log.info("Row %s: dang dang post_type=%s, %d anh", item.get("row"), post_type, len(images))
+    log.info(
+        "Row %s: dang dang post_type=%s, %d anh (mode=%s)",
+        item.get("row"), post_type, n_images, "binary" if has_file_ref else "url",
+    )
 
     try:
         if post_type == "carousel":
-            if len(images) < 2:
+            if n_images < 2:
                 return False, "", "Carousel can it nhat 2 anh"
-            post_id = fb.post_multi_photo(images, caption)
+            if has_file_ref:
+                binaries = [resolve_image_binary(r, sheet) for r in refs]
+                post_id = fb.post_multi_photo_binary(binaries, caption)
+            else:
+                urls = [r["value"] for r in refs]
+                post_id = fb.post_multi_photo(urls, caption)
         elif post_type == "photo":
-            if not images:
+            if n_images == 0:
                 return False, "", "Photo can 1 anh"
-            post_id = fb.post_single_photo(images[0], caption)
+            if has_file_ref:
+                img_bytes, fname = resolve_image_binary(refs[0], sheet)
+                post_id = fb.post_single_photo_binary(img_bytes, fname, caption)
+            else:
+                post_id = fb.post_single_photo(refs[0]["value"], caption)
         elif post_type == "link":
             if not link:
                 return False, "", "Link post can field 'link'"
@@ -152,7 +220,7 @@ def main() -> int:
 
     for item in pending:
         row = item.get("row")
-        ok, post_id, err = publish_one(fb, item)
+        ok, post_id, err = publish_one(fb, sheet, item)
         if ok:
             posted_at = datetime.now(TZ).strftime("%Y-%m-%d %H:%M:%S")
             try:

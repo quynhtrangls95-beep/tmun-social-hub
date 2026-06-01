@@ -203,6 +203,147 @@ class FacebookPage:
         return feed_body["id"]
 
     # -----------------------------------------------------------------
+    # Dang bai - BINARY (anh upload truc tiep, khong qua URL)
+    # Dung khi anh den tu Drive (qua Apps Script get_image -> base64).
+    # -----------------------------------------------------------------
+
+    def post_single_photo_binary(
+        self,
+        image_bytes: bytes,
+        filename: str,
+        caption: str,
+        published: bool = True,
+    ) -> str:
+        """
+        Dang 1 anh binary kem caption.
+        Dung khi anh khong co URL public (vd anh tu Drive).
+        Tuong tu post_single_photo nhung dung multipart upload.
+
+        Dual-pattern voi auto-fallback:
+        - Pattern A: upload unpublished -> attach feed (Advanced Access)
+        - Pattern B: direct /photos voi caption (Standard Access)
+        """
+        try:
+            return self._post_photo_binary_pattern_a(image_bytes, filename, caption, published)
+        except FacebookAPIError as e:
+            err_code = e.response.get("error", {}).get("code") if e.response else None
+            err_msg = str(e).lower()
+            log.warning(
+                "Binary Pattern A fail [code=%s]: %s. Thu Pattern B...", err_code, e
+            )
+            if err_code in (100, 200) or "unpublished" in err_msg or "must be posted" in err_msg:
+                return self._post_photo_binary_pattern_b(image_bytes, filename, caption, published)
+            raise
+
+    def _post_photo_binary_pattern_a(
+        self, image_bytes: bytes, filename: str, caption: str, published: bool
+    ) -> str:
+        """Pattern A: upload binary unpublished -> attach feed."""
+        files = {"source": (filename, image_bytes, self._guess_mime(filename))}
+        data = {"published": "false", "access_token": self.access_token}
+        photo_body = _request(
+            "POST", self._url(f"{self.page_id}/photos"), data=data, files=files
+        )
+        media_fbid = photo_body.get("id")
+        if not media_fbid:
+            raise FacebookAPIError(f"Khong lay duoc media_fbid: {photo_body}", photo_body)
+
+        feed_data = {
+            "message": caption,
+            "attached_media[0]": json.dumps({"media_fbid": str(media_fbid)}),
+            "published": "true" if published else "false",
+            "access_token": self.access_token,
+        }
+        feed_body = _request("POST", self._url(f"{self.page_id}/feed"), data=feed_data)
+        return feed_body["id"]
+
+    def _post_photo_binary_pattern_b(
+        self, image_bytes: bytes, filename: str, caption: str, published: bool
+    ) -> str:
+        """Pattern B: direct /photos voi caption + binary upload."""
+        files = {"source": (filename, image_bytes, self._guess_mime(filename))}
+        data = {
+            "caption": caption,
+            "published": "true" if published else "false",
+            "access_token": self.access_token,
+        }
+        body = _request(
+            "POST", self._url(f"{self.page_id}/photos"), data=data, files=files
+        )
+        return body.get("post_id") or body.get("id")
+
+    def post_multi_photo_binary(
+        self, images: list[tuple[bytes, str]], caption: str
+    ) -> str:
+        """
+        Dang nhieu anh binary (carousel).
+        `images` = list cua (bytes, filename) tuples.
+
+        Fallback: neu carousel fail, dang anh dau tien lam single + note carousel.
+        """
+        if not images:
+            raise FacebookAPIError("images rong")
+        if len(images) > 10:
+            raise FacebookAPIError("Toi da 10 anh / post")
+
+        try:
+            return self._post_carousel_binary_pattern_a(images, caption)
+        except FacebookAPIError as e:
+            err_code = e.response.get("error", {}).get("code") if e.response else None
+            err_msg = str(e).lower()
+            log.warning(
+                "Carousel binary Pattern A fail [code=%s]: %s. Fallback single...", err_code, e
+            )
+            if err_code in (100, 200) or "unpublished" in err_msg or "must be posted" in err_msg:
+                fallback_caption = caption
+                if len(images) > 1:
+                    fallback_caption += f"\n\n📷 (+{len(images) - 1} ảnh khác — em sẽ đăng bài tiếp)"
+                first_bytes, first_name = images[0]
+                return self._post_photo_binary_pattern_b(
+                    first_bytes, first_name, fallback_caption, True
+                )
+            raise
+
+    def _post_carousel_binary_pattern_a(
+        self, images: list[tuple[bytes, str]], caption: str
+    ) -> str:
+        """Carousel binary: upload moi anh unpublished -> attach all to feed."""
+        media_ids: list[str] = []
+        for img_bytes, fname in images:
+            files = {"source": (fname, img_bytes, self._guess_mime(fname))}
+            data = {"published": "false", "access_token": self.access_token}
+            body = _request(
+                "POST", self._url(f"{self.page_id}/photos"), data=data, files=files
+            )
+            mid = body.get("id")
+            if not mid:
+                raise FacebookAPIError(
+                    f"Khong lay duoc media_fbid cho {fname}: {body}", body
+                )
+            media_ids.append(mid)
+
+        feed_data = {"message": caption, "access_token": self.access_token}
+        for idx, mid in enumerate(media_ids):
+            feed_data[f"attached_media[{idx}]"] = json.dumps({"media_fbid": str(mid)})
+
+        feed_body = _request("POST", self._url(f"{self.page_id}/feed"), data=feed_data)
+        return feed_body["id"]
+
+    @staticmethod
+    def _guess_mime(filename: str) -> str:
+        """Doan content-type tu extension. Default: image/jpeg."""
+        ext = filename.lower().rsplit(".", 1)[-1] if "." in filename else ""
+        return {
+            "jpg": "image/jpeg",
+            "jpeg": "image/jpeg",
+            "png": "image/png",
+            "gif": "image/gif",
+            "webp": "image/webp",
+            "heic": "image/heic",
+            "heif": "image/heif",
+        }.get(ext, "image/jpeg")
+
+    # -----------------------------------------------------------------
     # Insights
     # -----------------------------------------------------------------
 

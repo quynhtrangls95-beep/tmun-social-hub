@@ -20,6 +20,10 @@ const SHEET_REPORT = "Bao cao";
 const SHEET_ANALYSIS = "Phan tich";
 const SHEET_LOGS = "Logs";
 
+// Folder Drive chua anh dang FB. Apps Script chay as chi nen
+// folder co the PRIVATE (chi chi share voi minh) — an toan hon.
+const DRIVE_FOLDER_ID = "1AemHaJ_-1Mt6ce9QnHrhchvm2b3TPBEF"; // TMUN-Anh-FB
+
 const SCHEDULE_HEADER = [
   "STT", "Ngay", "Gio", "Caption", "Anh (URL, nhieu anh cach |)",
   "Link gan", "Channel", "Post Type", "Dang bai", "Chu de",
@@ -169,6 +173,8 @@ function doGet(e) {
     if (action === "list_pending") return jsonResponse_({ ok: true, data: listPending_() });
     if (action === "list_posted") return jsonResponse_({ ok: true, data: listPosted_() });
     if (action === "daily_summary") return jsonResponse_({ ok: true, data: dailySummary_() });
+    if (action === "get_image") return jsonResponse_({ ok: true, data: getImage_(e.parameter.name || "") });
+    if (action === "list_images") return jsonResponse_({ ok: true, data: listImages_() });
     if (action === "ping") return jsonResponse_({ ok: true, message: "pong" });
     return jsonResponse_({ ok: false, error: "Unknown action: " + action });
   } catch (err) {
@@ -354,6 +360,72 @@ function dailySummary_() {
     }
   }
 
+  return out;
+}
+
+function getImage_(name) {
+  /**
+   * Lay file anh tu folder TMUN-Anh-FB theo TEN FILE.
+   * Tra ve {name, mime, size, base64}.
+   * Neu khong tim thay -> throw error.
+   *
+   * Match: tim file co title EXACT name, neu khong co thi tim file
+   * co title contains name (case-insensitive).
+   */
+  if (!name) throw new Error("Thieu tham so 'name'");
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+
+  // Pass 1: exact match
+  const exactIter = folder.getFilesByName(name);
+  if (exactIter.hasNext()) {
+    return _fileToObj_(exactIter.next());
+  }
+
+  // Pass 2: contains (case-insensitive). De chi co the go "matngu" thay vi "matngu_01.jpg"
+  const nameLower = name.toLowerCase();
+  const allFiles = folder.getFiles();
+  while (allFiles.hasNext()) {
+    const f = allFiles.next();
+    if (f.getName().toLowerCase().includes(nameLower)) {
+      return _fileToObj_(f);
+    }
+  }
+
+  throw new Error(`Khong tim thay anh "${name}" trong folder TMUN-Anh-FB`);
+}
+
+function _fileToObj_(file) {
+  const blob = file.getBlob();
+  return {
+    id: file.getId(),
+    name: file.getName(),
+    mime: blob.getContentType(),
+    size: blob.getBytes().length,
+    base64: Utilities.base64Encode(blob.getBytes()),
+  };
+}
+
+function listImages_() {
+  /**
+   * Liet ke tat ca file anh trong folder TMUN-Anh-FB.
+   * Tra ve [{name, id, mime, size, modified_at}] — KHONG kem base64 (de tranh response qua lon).
+   * Dung de Claude xem co bai nao chua dung de viet caption.
+   */
+  const folder = DriveApp.getFolderById(DRIVE_FOLDER_ID);
+  const files = folder.getFiles();
+  const out = [];
+  while (files.hasNext()) {
+    const f = files.next();
+    const mime = f.getMimeType();
+    if (!mime.startsWith("image/")) continue;
+    out.push({
+      id: f.getId(),
+      name: f.getName(),
+      mime: mime,
+      size: f.getSize(),
+      modified_at: Utilities.formatDate(f.getLastUpdated(), TZ, "yyyy-MM-dd HH:mm:ss"),
+    });
+  }
   return out;
 }
 

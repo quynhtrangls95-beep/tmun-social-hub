@@ -66,6 +66,21 @@ class SocialSheet:
         body = self._get({"action": "list_pending"})
         return body.get("data", [])
 
+    def get_image(self, name: str) -> dict:
+        """
+        Lay 1 anh tu folder Drive TMUN-Anh-FB theo TEN FILE.
+        Tra ve {id, name, mime, size, base64} hoac raise SheetError.
+
+        Match: exact name -> contains (case-insensitive).
+        """
+        body = self._get({"action": "get_image", "name": name})
+        return body.get("data", {})
+
+    def list_images(self) -> list[dict]:
+        """Liet ke anh trong folder (khong kem base64)."""
+        body = self._get({"action": "list_images"})
+        return body.get("data", [])
+
     def list_posted_for_report(self) -> list[dict]:
         """Lay danh sach bai da dang trong 30 ngay gan nhat de fetch insights."""
         body = self._get({"action": "list_posted"})
