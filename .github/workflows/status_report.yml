@@ -1,0 +1,45 @@
+name: Bao cao status hang ngay (Telegram)
+
+on:
+  schedule:
+    # 7h sang VN = 0h UTC: bao cao "hom qua + hom nay"
+    - cron: "0 0 * * *"
+    # 21h toi VN = 14h UTC: bao cao "hom nay + ngay mai"
+    - cron: "0 14 * * *"
+  workflow_dispatch:
+    inputs:
+      label:
+        description: "Force buoi sang hay toi (sang/toi). De trong = auto theo gio VN."
+        required: false
+        default: ""
+
+concurrency:
+  group: status-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run status_report.py
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_ACCESS_TOKEN: ${{ secrets.FB_PAGE_ACCESS_TOKEN }}
+          SHEETS_WEBHOOK_URL: ${{ secrets.SHEETS_WEBHOOK_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          REPORT_TIME_LABEL: ${{ inputs.label }}
+          PYTHONUNBUFFERED: "1"
+        run: python scripts/status_report.py

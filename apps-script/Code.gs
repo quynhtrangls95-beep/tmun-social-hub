@@ -168,6 +168,7 @@ function doGet(e) {
   try {
     if (action === "list_pending") return jsonResponse_({ ok: true, data: listPending_() });
     if (action === "list_posted") return jsonResponse_({ ok: true, data: listPosted_() });
+    if (action === "daily_summary") return jsonResponse_({ ok: true, data: dailySummary_() });
     if (action === "ping") return jsonResponse_({ ok: true, message: "pong" });
     return jsonResponse_({ ok: false, error: "Unknown action: " + action });
   } catch (err) {
@@ -263,6 +264,96 @@ function listPosted_() {
       topic: r[9] || "",
     });
   }
+  return out;
+}
+
+function dailySummary_() {
+  /**
+   * Tong hop thong tin cho daily report Telegram.
+   * Tra ve {
+   *   today, now_iso,
+   *   pending_today[], pending_tomorrow[], overdue_pending[],
+   *   posted_yesterday[], posted_today[],
+   *   posted_last_7_days, failed_last_7_days,
+   *   total_pending, upcoming_pending
+   * }
+   */
+  const sh = SpreadsheetApp.getActive().getSheetByName(SHEET_SCHEDULE);
+  const data = sh.getDataRange().getValues();
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const yesterday = new Date(today.getTime() - 86400000);
+  const sevenDaysAgo = new Date(today.getTime() - 7 * 86400000);
+
+  const todayStr = Utilities.formatDate(today, TZ, "yyyy-MM-dd");
+  const yesterdayStr = Utilities.formatDate(yesterday, TZ, "yyyy-MM-dd");
+  const tomorrowStr = Utilities.formatDate(tomorrow, TZ, "yyyy-MM-dd");
+
+  const out = {
+    today: todayStr,
+    now_iso: Utilities.formatDate(now, TZ, "yyyy-MM-dd HH:mm:ss"),
+    pending_today: [],
+    pending_tomorrow: [],
+    overdue_pending: [],
+    posted_yesterday: [],
+    posted_today: [],
+    posted_last_7_days: 0,
+    failed_last_7_days: 0,
+    total_pending: 0,
+    upcoming_pending: 0,
+  };
+
+  for (let i = 1; i < data.length; i++) {
+    const r = data[i];
+    const ngay = r[1];
+    const gio = r[2];
+    const captionPreview = (r[3] || "").toString().substring(0, 100);
+    const status = (r[10] || "").toString().trim();
+    const postId = (r[11] || "").toString().trim();
+    const postedAt = r[12];
+    const stt = r[0];
+    const form = r[8] || "";
+    const topic = r[9] || "";
+
+    const dateStr = ngay instanceof Date ? Utilities.formatDate(ngay, TZ, "yyyy-MM-dd") : "";
+    const gioStr = gio instanceof Date ? Utilities.formatDate(gio, TZ, "HH:mm") : String(gio || "");
+
+    if (status === "Pending") {
+      out.total_pending++;
+      const scheduled = combineDateTime_(ngay, gio);
+      const item = {
+        row: i + 1, stt: stt, ngay: dateStr, gio: gioStr,
+        caption_preview: captionPreview, form: form, topic: topic,
+      };
+      if (scheduled && scheduled < now) {
+        out.overdue_pending.push(item);
+      } else {
+        out.upcoming_pending++;
+        if (dateStr === todayStr) out.pending_today.push(item);
+        else if (dateStr === tomorrowStr) out.pending_tomorrow.push(item);
+      }
+    }
+
+    if (status === "Posted") {
+      const pDate = parseTimestamp_(postedAt);
+      const pDateStr = pDate ? Utilities.formatDate(pDate, TZ, "yyyy-MM-dd") : "";
+      const item = {
+        row: i + 1, stt: stt, post_id: postId,
+        posted_at: pDate ? Utilities.formatDate(pDate, TZ, "yyyy-MM-dd HH:mm") : "",
+        caption_preview: captionPreview, form: form, topic: topic,
+      };
+      if (pDateStr === todayStr) out.posted_today.push(item);
+      else if (pDateStr === yesterdayStr) out.posted_yesterday.push(item);
+      if (pDate && pDate >= sevenDaysAgo) out.posted_last_7_days++;
+    }
+
+    if (status === "Failed") {
+      const scheduled = combineDateTime_(ngay, gio);
+      if (scheduled && scheduled >= sevenDaysAgo) out.failed_last_7_days++;
+    }
+  }
+
   return out;
 }
 
