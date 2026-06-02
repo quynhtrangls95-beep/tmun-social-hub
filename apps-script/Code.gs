@@ -176,6 +176,8 @@ function doGet(e) {
     if (action === "get_image") return jsonResponse_({ ok: true, data: getImage_(e.parameter.name || "") });
     if (action === "list_images") return jsonResponse_({ ok: true, data: listImages_() });
     if (action === "ping") return jsonResponse_({ ok: true, message: "pong" });
+    if (action === "setup_triggers") return jsonResponse_({ ok: true, data: setupTriggers() });
+    if (action === "list_triggers") return jsonResponse_({ ok: true, data: ScriptApp.getProjectTriggers().map(t => ({ handler: t.getHandlerFunction(), event_type: String(t.getEventType()), trigger_source: String(t.getTriggerSource()) })) });
     return jsonResponse_({ ok: false, error: "Unknown action: " + action });
   } catch (err) {
     return jsonResponse_({ ok: false, error: String(err) });
@@ -681,6 +683,45 @@ function setupDrivePermissions() {
 //     - Sang: Day timer > 7 AM
 //     - Toi: Day timer > 9 PM
 // =====================================================================
+
+function setupTriggers() {
+  /**
+   * Tu dong tao 3 time-driven triggers + xoa cac trigger cu (de tranh duplicate).
+   * Chay 1 lan tu menu "Chay" sau khi setup GITHUB_PAT.
+   * - Publish: every 5 minutes
+   * - Status report sang: 7 AM hang ngay
+   * - Status report toi: 9 PM hang ngay
+   */
+  const existing = ScriptApp.getProjectTriggers();
+  for (const t of existing) {
+    ScriptApp.deleteTrigger(t);
+  }
+  Logger.log("Da xoa " + existing.length + " triggers cu");
+
+  ScriptApp.newTrigger("triggerPublishWorkflow")
+    .timeBased()
+    .everyMinutes(5)
+    .create();
+
+  ScriptApp.newTrigger("triggerStatusReport")
+    .timeBased()
+    .atHour(7)
+    .everyDays(1)
+    .create();
+
+  ScriptApp.newTrigger("triggerStatusReport")
+    .timeBased()
+    .atHour(21)
+    .everyDays(1)
+    .create();
+
+  const newTriggers = ScriptApp.getProjectTriggers();
+  Logger.log("Tao " + newTriggers.length + " triggers moi:");
+  for (const t of newTriggers) {
+    Logger.log("- " + t.getHandlerFunction() + " (" + t.getEventType() + ")");
+  }
+  return { ok: true, trigger_count: newTriggers.length };
+}
 
 function triggerPublishWorkflow() {
   return _triggerWorkflow_("publish.yml");
