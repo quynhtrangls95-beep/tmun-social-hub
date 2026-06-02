@@ -212,11 +212,29 @@ def main() -> int:
         log.info("Khong co bai nao den gio dang. Bye.")
         return 0
 
-    log.info("Co %d bai can dang", len(pending))
+    # RATE LIMIT: chi dang MAX_POSTS_PER_RUN bai/run de tranh dồn dập tren FB Page.
+    # Default 1 — cron mỗi 5 phút rải đều, không bao giờ burst.
+    # Set env MAX_POSTS_PER_RUN cao hơn nếu muốn catch-up nhanh sau outage.
+    max_posts = int(os.getenv("MAX_POSTS_PER_RUN", "1"))
+    total_pending = len(pending)
+    pending = pending[:max_posts]
+
+    if total_pending > max_posts:
+        log.info(
+            "Rate limit: %d bai overdue, chi dang %d bai dau (oldest first). "
+            "%d bai con lai cho run cron sau.",
+            total_pending, max_posts, total_pending - max_posts,
+        )
+        _emit_summary_line(
+            f"\n📋 Co **{total_pending} bai** overdue. Rate limit `MAX_POSTS_PER_RUN={max_posts}` → "
+            f"dang **{max_posts}** bai dau, {total_pending - max_posts} bai cho run sau.\n"
+        )
+    else:
+        log.info("Co %d bai can dang", total_pending)
+        _emit_summary_line(f"\n📋 Co **{total_pending} bai** can dang.\n")
+
     success_count = 0
     fail_count = 0
-
-    _emit_summary_line(f"\n📋 Co **{len(pending)} bai** can dang.\n")
 
     for item in pending:
         row = item.get("row")

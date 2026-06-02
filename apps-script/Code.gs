@@ -655,3 +655,65 @@ function setupDrivePermissions() {
   Logger.log("OK! Folder '" + name + "' co " + fileCount + " file.");
   return { folder: name, file_count: fileCount };
 }
+
+// =====================================================================
+// RELIABLE CRON TRIGGER — bypass GitHub Actions schedule skip
+//
+// GitHub Actions docs: scheduled workflows */5 PHUT thuong bi skip
+// khi runner busy. Apps Script time-driven trigger reliable hon nhieu.
+//
+// SETUP (chi Trang lam 1 lan):
+//  1. Tao GitHub Personal Access Token (fine-grained):
+//     - https://github.com/settings/personal-access-tokens/new
+//     - Repository access: chi tmun-social-hub
+//     - Permissions: Actions = Read and write
+//     - Generate, copy PAT
+//  2. Paste vao Script Properties:
+//     - File > Project Properties > Script Properties (Apps Script editor moi: Settings > Script properties)
+//     - Key: GITHUB_PAT, Value: <PAT>
+//  3. Setup time-driven trigger:
+//     - Triggers (icon dong ho ben trai editor) > Add Trigger
+//     - Function: triggerPublishWorkflow
+//     - Event source: Time-driven
+//     - Type: Minutes timer > Every 5 minutes
+//     - Save
+//  4. (Optional) Lam tuong tu cho triggerStatusReport voi 2 triggers:
+//     - Sang: Day timer > 7 AM
+//     - Toi: Day timer > 9 PM
+// =====================================================================
+
+function triggerPublishWorkflow() {
+  return _triggerWorkflow_("publish.yml");
+}
+
+function triggerStatusReport() {
+  return _triggerWorkflow_("status_report.yml");
+}
+
+function _triggerWorkflow_(workflowFile) {
+  const PAT = PropertiesService.getScriptProperties().getProperty("GITHUB_PAT");
+  if (!PAT) {
+    Logger.log("Thieu GITHUB_PAT trong Script Properties");
+    return { ok: false, error: "Missing GITHUB_PAT" };
+  }
+  const REPO = "quynhtrangls95-beep/tmun-social-hub";
+  const url = `https://api.github.com/repos/${REPO}/actions/workflows/${workflowFile}/dispatches`;
+  const resp = UrlFetchApp.fetch(url, {
+    method: "post",
+    contentType: "application/json",
+    headers: {
+      Authorization: "Bearer " + PAT,
+      Accept: "application/vnd.github+json",
+      "X-GitHub-Api-Version": "2022-11-28",
+    },
+    payload: JSON.stringify({ ref: "main" }),
+    muteHttpExceptions: true,
+  });
+  const code = resp.getResponseCode();
+  const body = resp.getContentText();
+  Logger.log(`Trigger ${workflowFile}: status=${code} body=${body.substring(0, 200)}`);
+  if (code === 204) {
+    return { ok: true, workflow: workflowFile };
+  }
+  return { ok: false, status: code, error: body };
+}
